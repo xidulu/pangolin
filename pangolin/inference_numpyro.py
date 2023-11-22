@@ -219,7 +219,7 @@ def sample(cond_dist, key, *parent_vals):
     elif dist_class in class_sample_funs:
         return class_sample_funs[dist_class](cond_dist, key, *parent_vals)
     else:
-        raise NotImplementedError()
+        raise NotImplementedError(f"no sample fun implemented for {cond_dist}")
 
 
 def evaluate(cond_dist, *parent_vals):
@@ -233,7 +233,7 @@ def evaluate(cond_dist, *parent_vals):
     elif dist_class in class_evaluation_funs:
         return class_evaluation_funs[dist_class](cond_dist, *parent_vals)
     else:
-        raise NotImplementedError()
+        raise NotImplementedError(f"no eval fun implemented for {cond_dist}")
 
 
 ################################################################################
@@ -244,6 +244,7 @@ numpyro_dists = {
     interface.uniform: dist.Uniform,
     interface.normal_scale: dist.Normal,
     interface.bernoulli: dist.Bernoulli,
+    interface.bernoulli_logit: dist.BernoulliLogits,
     interface.categorical: dist.Categorical,
     interface.dirichlet: dist.Dirichlet,
     interface.binomial: dist.Binomial,
@@ -251,6 +252,7 @@ numpyro_dists = {
     interface.exponential: dist.Exponential,
     interface.beta_binomial: dist.BetaBinomial,
     interface.multinomial: dist.Multinomial,
+    interface.multi_normal_cov: dist.MultivariateNormal,
 }
 
 
@@ -263,9 +265,9 @@ def log_prob_vmap(cond_dist, observed_val, *parent_vals):
 
 
 def sample_vmap(cond_dist, rng_key, *parent_vals):
-    print(f"{cond_dist=}")
-    print(f"{rng_key=}")
-    print(f"{parent_vals=}")
+    # print(f"{cond_dist=}")
+    # print(f"{rng_key=}")
+    # print(f"{parent_vals=}")
     my_sample = functools.partial(sample, cond_dist.base_cond_dist)
     rng_keys = jax.random.split(rng_key, cond_dist.axis_size)
     samps = jax.vmap(
