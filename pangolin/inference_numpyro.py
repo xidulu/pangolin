@@ -5,7 +5,9 @@ from jax import numpy as jnp
 from numpyro import distributions as dist
 from numpyro.infer import MCMC, NUTS
 import random
+from typing import Sequence
 
+from .interface import InvalidAncestorQuery
 
 ################################################################################
 # First major primitive — evaluate conditional log probs on groups of nodes
@@ -27,9 +29,9 @@ def ancestor_log_prob_flat(vars, vals, given_vars, given_vals):
     given_vals = util.assimilate_vals(given_vars, given_vals)
 
     for var in vars:
-        assert var.cond_dist.is_random, "all vars must be random"
+        assert var.cond_dist.random, "all vars must be random"
     for var in given_vars:
-        assert var.cond_dist.is_random, "all given vars must be random"
+        assert var.cond_dist.random, "all given vars must be random"
 
     upstream_vars = dag.upstream_nodes(
         vars, block_condition=lambda node: (node in given_vars) and (node not in vars)
@@ -44,7 +46,7 @@ def ancestor_log_prob_flat(vars, vals, given_vars, given_vals):
             assert p in computed_vals, "bug: all parents should already be computed"
         parent_vals = [computed_vals[p] for p in node.parents]
 
-        if node.cond_dist.is_random:
+        if node.cond_dist.random:
             assert node in vars, "user error: random node in tree not included"
             assert node in input_vals, "bug"
 
@@ -66,7 +68,15 @@ def ancestor_log_prob_flat(vars, vals, given_vars, given_vals):
 ################################################################################
 
 
-def ancestor_sample_flat(key, vars, given_vars, given_vals):
+def ancestor_sample_flat(vars, given_vars, given_vals, *, niter):
+    key = jax.random.PRNGKey(random.randint(0, 10**9))
+    keys = jax.random.split(key, niter)
+    return jax.vmap(
+        lambda key: ancestor_sample_flat_key(key, vars, given_vars, given_vals)
+    )(keys)
+
+
+def ancestor_sample_flat_key(key, vars, given_vars, given_vals):
     """
     This samples a bunch of `RV`s using ancestor sampling.
     * `key` - a `jax.random.PRNGKey`
@@ -92,16 +102,22 @@ def ancestor_sample_flat(key, vars, given_vars, given_vals):
     )
 
     computed_vals = util.WriteOnceDict(zip(given_vars, given_vals))
+    print(f"{upstream_vars=}")
+    print(f"{computed_vals=}")
     for node in upstream_vars:
         for p in node.parents:
-            assert p in computed_vals, "bug: all parents should already be computed"
+            # assert p in computed_vals, "bug: all parents should already be computed"
+            if p not in computed_vals:
+                raise InvalidAncestorQuery("needed parent not computed")
         parent_vals = [computed_vals[p] for p in node.parents]
 
-        if node.cond_dist.is_random:
+        if node.cond_dist.random:
             key, subkey = jax.random.split(key)
             val = sample(node.cond_dist, subkey, *parent_vals)
         else:
             val = evaluate(node.cond_dist, *parent_vals)
+        if node in computed_vals:
+            raise InvalidAncestorQuery("sampled node already computed")
         computed_vals[node] = val
     return [computed_vals[var] for var in vars]
 
@@ -115,7 +131,7 @@ def ancestor_sample_flat(key, vars, given_vars, given_vals):
 # should be in DAG
 
 
-def sample_flat(requested_vars, given_vars, given_vals, *, niter):
+def sample_flat(vars, given_vars, given_vals, *, niter):
     """
     Do MCMC using Numpyro.
 
@@ -125,11 +141,11 @@ def sample_flat(requested_vars, given_vars, given_vals, *, niter):
     * `given_vals`: A list of numpy arrays with values for `given_vars`
     """
 
-    assert isinstance(given_vars, list)
-    assert isinstance(given_vals, list)
-    assert isinstance(requested_vars, list)
+    assert isinstance(given_vars, Sequence)
+    assert isinstance(given_vals, Sequence)
+    assert isinstance(vars, Sequence)
 
-    for node in requested_vars:
+    for node in vars:
         assert isinstance(node, interface.RV)
 
     # given_vals = util.assimilate_vals(given_vars, given_vals)
@@ -139,7 +155,7 @@ def sample_flat(requested_vars, given_vars, given_vals, *, niter):
         assert var.shape == val.shape
 
     # this variable splitting business is a bit of a mess (although seemingly correct)
-    random_vars = inference.upstream_with_descendent(requested_vars, given_vars)
+    random_vars = inference.upstream_with_descendent(vars, given_vars)
     latent_vars = [node for node in random_vars if node not in given_vars]
 
     if not latent_vars:  # could be that latent_vars == []
@@ -177,8 +193,8 @@ def sample_flat(requested_vars, given_vars, given_vals, *, niter):
         latent_samps = mcmc.get_samples()
 
     key = jax.random.PRNGKey(random.randint(0, 10**9))
-    sample_fn = lambda key, latent_vals: ancestor_sample_flat(
-        key, requested_vars, latent_vars + given_vars, latent_vals + given_vals
+    sample_fn = lambda key, latent_vals: ancestor_sample_flat_key(
+        key, vars, latent_vars + given_vars, latent_vals + given_vals
     )
 
     rng_key = jax.random.split(key, niter)
@@ -194,13 +210,14 @@ def sample_flat(requested_vars, given_vars, given_vals, *, niter):
 
 def log_prob(cond_dist, observed_val, *parent_vals):
     "compute log probabilities for a single cond_dist"
-    assert cond_dist.is_random
+    assert cond_dist.random
     dist_class = type(cond_dist)
     if cond_dist in numpyro_dists:
         return numpyro_dists[cond_dist](*parent_vals).log_prob(observed_val)
     elif cond_dist in log_prob_funs:
-        raise NotImplementedError("not activated")  # line below "should" work
-        # return log_prob_funs[cond_dist](observed_val,*parent_vals)
+        raise NotImplementedError(
+            "not activated"
+        )  # line below "should" work  # return log_prob_funs[cond_dist](observed_val,*parent_vals)
     elif dist_class in class_log_prob_funs:
         return class_log_prob_funs[dist_class](cond_dist, observed_val, *parent_vals)
     else:
@@ -209,13 +226,14 @@ def log_prob(cond_dist, observed_val, *parent_vals):
 
 def sample(cond_dist, key, *parent_vals):
     "sample a single cond_dist"
-    assert cond_dist.is_random
+    assert cond_dist.random
     dist_class = type(cond_dist)
     if cond_dist in numpyro_dists:
         return numpyro_dists[cond_dist](*parent_vals).sample(key)
     elif cond_dist in sample_funs:
-        raise NotImplementedError("not activated")  # line below "should" work
-        # return sample_funs[cond_dist](key,*parent_vals)
+        raise NotImplementedError(
+            "not activated"
+        )  # line below "should" work  # return sample_funs[cond_dist](key,*parent_vals)
     elif dist_class in class_sample_funs:
         return class_sample_funs[dist_class](cond_dist, key, *parent_vals)
     else:
@@ -226,7 +244,7 @@ def evaluate(cond_dist, *parent_vals):
     """
     evaluate a single cond_dist
     """
-    assert not cond_dist.is_random
+    assert not cond_dist.random
     dist_class = type(cond_dist)
     if cond_dist in evaluation_funs:
         return evaluation_funs[cond_dist](*parent_vals)
@@ -254,6 +272,11 @@ numpyro_dists = {
     interface.multinomial: dist.Multinomial,
     interface.multi_normal_cov: dist.MultivariateNormal,
 }
+
+
+def eval_LogProb(cond_dist, observed_val, *parent_vals):
+    my_log_prob = functools.partial(log_prob, cond_dist.base_cond_dist)
+    return my_log_prob(observed_val, *parent_vals)
 
 
 def log_prob_vmap(cond_dist, observed_val, *parent_vals):
@@ -323,4 +346,17 @@ class_evaluation_funs = {
     interface.Sum: lambda cond_dist, a: jnp.sum(a, axis=cond_dist.axis),
     interface.Index: eval_index,  # implemented above
     interface.VMapDist: eval_vmap,
+    interface.LogProb: eval_LogProb,
 }
+
+
+################################################################################
+# Create a vmapped distribution
+################################################################################
+
+
+# class VMapDist(dist.Distribution):
+#
+#     def __init__(self, base_dist, **args, *, validate_args=None):
+#         self.args = args
+#         super().__init__()

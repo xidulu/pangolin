@@ -132,8 +132,8 @@ class_gencode_fns = {
     interface.VMapDist: gencode_vmapdist_factory(gencode),
     interface.Index: gencode_index,
     interface.Sum: gencode_sum,
-    interface.CondProb: gencode_unsupported(),
-    interface.Mixture: gencode_unsupported(),
+    # interface.CondProb: gencode_unsupported(),
+    # interface.Mixture: gencode_unsupported(),
 }
 
 
@@ -295,7 +295,7 @@ def stan_code_flat(requested_vars, given_vars, given_vals):
             # transformed DATA can be int
             mycode = types[var].declare(ids[var]) + "\n"
             data_code += mycode
-        elif var.cond_dist.is_random:
+        elif var.cond_dist.random:
             mycode = types[var].declare(ids[var]) + "\n"
             parameters_code += mycode
         else:
@@ -313,7 +313,7 @@ def stan_code_flat(requested_vars, given_vars, given_vals):
             parent_refs = [Reference(ids[p], p.shape) for p in var.parents]
             cond_dist = var.cond_dist
             mycode = gencode(cond_dist, 0, ref, *parent_refs)
-            if cond_dist.is_random:
+            if cond_dist.random:
                 model_code += mycode
             else:
                 transformed_parameters_code += mycode
@@ -324,6 +324,8 @@ def stan_code_flat(requested_vars, given_vars, given_vals):
     transformed_parameters_code += "}\n"
 
     code = data_code + parameters_code + transformed_parameters_code + model_code
+
+    # print(code)
 
     monitor_vars = [ids[var] for var in requested_vars]
 
@@ -352,12 +354,10 @@ def sample_flat(requested_vars, given_vars, given_vals, *, niter):
         assert var.shape == val.shape
 
     # this variable splitting business is a bit of a mess (although seemingly correct)
-    random_vars = inference.upstream_with_descendent(requested_vars, given_vars)
-    latent_vars = [node for node in random_vars if node not in given_vars]
+    # random_vars = inference.upstream_with_descendent(requested_vars, given_vars)
+    # latent_vars = [node for node in random_vars if node not in given_vars]
 
-    code, monitor_vars, evidence = stan_code_flat(
-        requested_vars, given_vars, given_vals
-    )
+    code, monitor_vars, evidence = stan_code_flat(requested_vars, given_vars, given_vals)
 
     # print("CODE")
     # print(code)
