@@ -142,11 +142,11 @@ Begin testing end-to-end AutoVmap
 
 
 def test_AutoVmap():
-    # Fully vmappable cases
     """
-    Idea: Check three things
-    1. If find(transformed_vars) == 0
+    Idea: Check following things for the output of AutoVmap
+    1. If find(transformed_vars) == 0, i.e. no more vmappable groups
     2. If all transformed_vars are indexed from a vmapRV
+    3. If transformed_vars has the same length as vars
     3. If the empirical mean and cov (from ancestral sampling) matches with the original model.
     """
     pass
