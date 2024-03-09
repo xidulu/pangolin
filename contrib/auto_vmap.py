@@ -106,8 +106,10 @@ def _is_grouppable(nodes):
         list(v) for k, v in groupby(augmented_node_list, lambda X: X[1])
     ]
     if len(grouped_result) == len(augmented_node_list):
+        # Not grouppable
         return None
     else:
+        # If grouppable, return the indicies of each group
         return [[idx for idx, node in group] for group in grouped_result]
 
 

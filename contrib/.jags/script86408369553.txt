@@ -1,0 +1,17 @@
+model in ".jags/model86408369553.bug"
+data in ".jags/data86408369553.R"
+compile, nchains(1)
+parameters in ".jags/inits86408369553.R"
+initialize
+update 1
+monitor v2
+monitor v4
+monitor v6
+monitor v8
+monitor v10
+monitor v12
+monitor v14
+monitor v16
+monitor v18
+update 1
+coda *, stem(.jags/CODA)
