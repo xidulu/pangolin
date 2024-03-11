@@ -46,7 +46,9 @@ def HashKey(var):
     key = (var.cond_dist,)
     for p in var.parents:
         if isinstance(p.cond_dist, Index):
-            subkey = (p.parents[0], p.cond_dist.slices)
+            # Need to ensure all indexed node having the same "slice"
+            # however slice is not hashable, so we convert them to string
+            subkey = (p.parents[0], str(p.cond_dist.slices), tuple(var.shape for var in p.parents[1:]))
         elif isinstance(p.cond_dist, Constant):
             subkey = (p.cond_dist.value.shape,)
         else:
@@ -137,15 +139,29 @@ def MergeIndexRVs(vars):
     assert all(
         x.parents[0] == vars[0].parents[0] for x in vars
     ) # Check all RVs are indexed from the same RV
-    # slice_config = vars[0].cond_dist.slices
-    all_indices = np.array(
-        tree_map(lambda x: x.cond_dist.value, [var.parents[1:] for var in vars])
-    ).T
-    # TODO: Simplify the index node, if all dimensions are indexed, then we just Slice(None, None, None)
+    slice_config = vars[0].cond_dist.slices
+    indexed_dims = [i for i, s in enumerate(slice_config) if s is None]
+    assert len(indexed_dims) > 0, 'no indexed dim found'
     indexed_node = vars[0].parents[0]
+    all_indices = []
+    for i in range(len(indexed_dims)):
+        assert all(
+            var.parents[1:][i].cond_dist.value.shape == vars[0].parents[1:][i].cond_dist.value.shape
+            for var in vars
+        ), "All indicies should have the same shape"
+        all_indices.append(
+            np.stack([var.parents[1:][i].cond_dist.value for var in vars])
+        )
+    # Special case: Only one axis is indexed, and all elements are selected,
+    # then we don't need additional index node
+    if len(all_indices) == 1:
+        assert len(indexed_dims) == 1
+        vmap_dim = indexed_dims[0]
+        if np.array_equal(all_indices[0], np.arange(indexed_node.shape[vmap_dim])):
+            return indexed_node, vmap_dim
+    
     # Find vmap dim, if slices are consecutive, then it is dimension of the first "None" in slice,
     # otherwise it is the 0th dimension.
-    slice_config = vars[0].cond_dist.slices
     vmap_dim = find_first_none_consecutive(slice_config)
     return vars[0].cond_dist(indexed_node, *all_indices), vmap_dim
 

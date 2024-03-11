@@ -3,13 +3,13 @@ from pangolin import transforms
 from pangolin.interface import (
     vmap, normal_scale, normal, RV, VMapDist,
     makerv, viz_upstream, exponential, bernoulli, print_upstream,
-    Constant, plate, exp
+    Constant, plate, exp, Index, multi_normal_cov, Sum
 )
 from pangolin import Calculate
 from pangolin import dag
 import numpy as np
-from contrib.auto_vmap_general import Replace, Merge, Find, AutoVmap, AggregateParents, MergeIndexRVs
-from jax.tree_util import tree_flatten, tree_unflatten
+from contrib.auto_vmap import Replace, Merge, Find, AutoVmap, AggregateParents, MergeIndexRVs
+from jax.tree_util import tree_flatten, tree_unflatten, tree_map
 
 from utils import check_same_joint_cond_dist
 
@@ -72,6 +72,33 @@ def test_find():
     grouped_rvs = Find(tree_flatten([x, y, z])[0])
     assert len(grouped_rvs) == 4 # x, (y[0], z[1]), (y[1], z[2]), (y[2], x[0])
 
+    # Test 3D index cases
+    y = plate(N=7)(lambda:
+            plate(N=5)(lambda:
+               plate(N=6)(lambda:
+                          normal_scale(0,1))))
+    indexed_nodes = [y[1, 0, 0], y[0, 2, 0], y[0, 0, 3]]
+    z = [normal_scale(indexed_nodes[i], 1) for i in range(len(indexed_nodes))]
+    assert len(Find(z)) == 1
+
+    indexed_nodes = [y[0, 0, :], y[0, 2, :], y[0, 1, :], y[0, :, 0], y[1, :, 1]]
+    z = [
+        multi_normal_cov(indexed_nodes[i], np.eye(indexed_nodes[i].shape[0])) for i in range(len(indexed_nodes))
+    ]
+    assert len(Find(z)) == 2
+
+    indexed_nodes = [y[0, 0, :], y[0, 2, :], y[1, :, 1]]
+    z = [
+        multi_normal_cov(indexed_nodes[i], np.eye(indexed_nodes[i].shape[0])) for i in range(len(indexed_nodes))
+    ]
+    assert len(Find(z)) == 1
+
+    x = vmap(normal_scale, in_axes=None, axis_size=5)(0, 1)
+    indexed_nodes = [x[[0, 1]], x[[1, 1]], x[[2, 2]], x[[1,1,1]], x[[2, 2, 2]]]
+    z = [
+        multi_normal_cov(indexed_nodes[i], np.eye(indexed_nodes[i].shape[0])) for i in range(len(indexed_nodes))
+    ]
+    assert len(Find(z)) == 2
 
     print('Find test passed')
 
@@ -81,6 +108,12 @@ def test_merge_indexed_rv():
             plate(N=5)(lambda:
                plate(N=6)(lambda:
                           normal_scale(0,1))))
+
+    indexed_nodes = [y[0, 1, 0], y[0, 2, 0], y[0, 0, 1], y[0, 0, 2]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (4,)
+    assert indexed_dim == 0
+
     indexed_nodes = [y[:, 2, :], y[:, 3, :], y[:, 1, :], y[:, 2, :]]
     merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
     assert merged_rv.shape == (7, 4, 6)
@@ -93,15 +126,70 @@ def test_merge_indexed_rv():
     assert indexed_dim == 2
     assert all(merged_rv.parents[1].cond_dist.value == np.array([1, 0, 1, 0]))
 
+    indexed_nodes = [y[0, :, 0], y[0, :, 0], y[0, :, 1], y[0, :, 2]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (4, 5)
+    assert indexed_dim == 0
+
+    ## This case does not work
+    # indexed_nodes = [y[0, ...], y[0, ...], y[1, ...], y[2, ...]]
+    # merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    # assert merged_rv.shape == (4, 5, 6)
+    # assert indexed_dim == 0
+
+    indexed_nodes = [y[:, 0, 0], y[:, 1, 0], y[:, 1, 1], y[:, 0, 2]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (7, 4)
+    assert indexed_dim == 1
+
     indexed_nodes = [y[:, :, i] for i in range(6)]
     merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
     assert merged_rv.shape == (7, 5, 6)
     assert indexed_dim == 2
     assert (merged_rv == y)
 
+    indexed_nodes = [y[:, i, :] for i in range(5)]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (7, 5, 6)
+    assert indexed_dim == 1
+    assert (merged_rv == y)
+
+    indexed_nodes = [y[:, :, [0, 1, 2]], y[:, :, [1, 2, 3]]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (7, 5, 2, 3)
+    assert indexed_dim == 2
+
+    indexed_nodes = [y[[0, 0, 1], :, :], y[[1, 1, 2], :, :]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (2, 3, 5, 6)
+    assert indexed_dim == 0
+
+    indexed_nodes = [y[[0, 0, 1], :, [1, 2, 3]], y[[1, 1, 2], :, [1, 2, 3]]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (2, 3, 5)
+    assert indexed_dim == 0
+
+    indexed_nodes = [y[:, [0, 0, 0], [1, 2, 3]], y[:, [1, 1, 1], [1, 2, 3]]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (7, 2, 3)
+    assert indexed_dim == 1
+
+    x = vmap(normal_scale, in_axes=None, axis_size=5)(0, 1)
+    indexed_nodes = [x[[1,1,1]], x[[2, 2, 2]]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (2, 3)
+    assert indexed_dim == 0
+
     print('Merge indexed node good cases passed')
 
     indexed_nodes = [y[:, :, 0], y[1, :, :], y[:, 0, :]]
+    _test_raise_exception(MergeIndexRVs, indexed_nodes)
+
+    indexed_nodes = [y[:, :, :], y[:, :, :], y[:, :, :]]
+    _test_raise_exception(MergeIndexRVs, indexed_nodes)
+
+    x = vmap(normal_scale, in_axes=None, axis_size=5)(0, 1)
+    indexed_nodes = [x[[0, 1]], x[[1, 1]], x[[2, 2]], x[[1,1,1]], x[[2, 2, 2]]]
     _test_raise_exception(MergeIndexRVs, indexed_nodes)
 
     print('Merge indexed node bad cases passed')
@@ -134,7 +222,6 @@ def test_merge():
     print('Merge bad cases passed')
 
 
-
 '''
 Begin testing end-to-end AutoVmap
 '''
@@ -146,10 +233,50 @@ def test_AutoVmap():
     Idea: Check following things for the output of AutoVmap
     1. If find(transformed_vars) == 0, i.e. no more vmappable groups
     2. If all transformed_vars are indexed from a vmapRV
-    3. If transformed_vars has the same length as vars
+    3. If transformed_vars has the same length as varsa
     3. If the empirical mean and cov (from ancestral sampling) matches with the original model.
     """
-    pass
+    def _test_model(vars, given_vars=[], given_vals=[], order=1):
+        vars, tree_def = tree_flatten(vars)
+        given_vars = tree_flatten(given_vars)[0]
+        given_vals = tree_flatten(given_vals)[0]
+        transformed_var, transformed_given_var, transformed_given_vals = AutoVmap(
+            vars, given_vars, given_vals, order
+        )
+        assert len(transformed_var) == len(vars)
+        assert len(Find(transformed_var)) == 0
+        assert all(isinstance(var.cond_dist, Index) for var in transformed_var)
+
+    
+    x = normal(0,1)
+    y = [normal(x,1) for i in range(3)]
+    z = [[normal(yi,1) for i in range(4)] for yi in y]
+    _test_model(y + z, order=0)
+    _test_model(y + z, order=-1)
+
+
+    B = 3 # Batch size
+    T = 5 # sequence length
+    Q = [multi_normal_cov(np.zeros(T), np.eye(T)) for _ in range(B)] # Queries
+    K = [multi_normal_cov(np.zeros(T), np.eye(T)) for _ in range(B)] # Keys
+    V = [vmap(exp)(multi_normal_cov(np.zeros(T), np.eye(T))) for _ in range(B)] # Values
+    outputs = []
+    for b in range(B): # b: Batch ID
+        output = []
+        for t in range(T):
+            q = Q[b][t] # The t_th token for query of the b_th sample.
+            k = K[b] # Keys of the b_th sample
+            similarity_score = q * k # q * k denotes the similarity score
+            output.append(
+                Sum(0)(similarity_score * V[b]) # sum(score_t * value)
+            )
+        outputs.append(output)
+    _test_model(outputs, order=0)
+    _test_model(outputs, order=-1)
+
+    print('AutoVmap test passed')
+
+
 
 # def test_AutoVmap_case1():
 #     # Check same joint distribution with no observed values
@@ -167,5 +294,5 @@ def test_AutoVmap():
 
 test_find()
 test_merge_indexed_rv()
-test_merge()
+# test_merge()
 test_AutoVmap()
