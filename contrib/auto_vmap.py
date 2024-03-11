@@ -16,6 +16,28 @@ import numpy as np
 from collections import defaultdict
 
 
+def find_first_none_consecutive(my_list):
+    '''
+    @Author: ChatGPT
+    '''
+    try:
+        # Step 1: Find the index of the first None
+        first_none_index = my_list.index(None)
+    except ValueError:
+        # None is not in the list
+        raise ValueError('No indexed dim found!')
+
+    # Step 2 & 3: Check if None values are consecutive
+    for i in range(first_none_index, len(my_list)):
+        if my_list[i] != None and i + 1 < len(my_list) and my_list[i + 1] == None:
+            # Found a non-None value followed by another None, so they are not consecutive
+            return 0
+
+    # Step 4: All None values are consecutive
+    return first_none_index
+
+
+
 def HashKey(var):
     '''
     var: An RV
@@ -24,11 +46,11 @@ def HashKey(var):
     key = (var.cond_dist,)
     for p in var.parents:
         if isinstance(p.cond_dist, Index):
-            subkey = (p.parents[0], 'Index')
+            subkey = (p.parents[0], p.cond_dist.slices)
         elif isinstance(p.cond_dist, Constant):
-            subkey = (p.cond_dist.value.shape, 'Constant')
+            subkey = (p.cond_dist.value.shape,)
         else:
-            subkey = (p, 'Other')
+            subkey = (p,)
         key = key + subkey
     return key
 
@@ -62,6 +84,41 @@ def Find(vars, given_vars=[]):
     return groupped_rvs
 
 
+# def MergeIndexRVs(vars):
+#     '''
+#     Input:
+#     A list of RVs with Index(slices) as cond_dist, where the value of slices is the same
+#     for all RVs, i.e. indexed from the same axis.
+#     In addition, all RVs are indexed from the same RV.
+#     Lastly, all RVs should be indexed from a single axis only, otherwise vmap cannot work.
+    
+#     Return:
+#     A single Index RV, and an interger denoting the dimension being indexed.
+#     '''
+#     assert isinstance(vars[0].cond_dist, Index)
+#     assert all(
+#         x.cond_dist == vars[0].cond_dist for x in vars
+#     ) # Check all RVs have the same slice, i.e. indexed from the same axis
+#     assert all(
+#         x.parents[0] == vars[0].parents[0] for x in vars
+#     ) # Check all RVs are indexed from the same RV
+#     slice_config = vars[0].cond_dist.slices
+#     indexed_dim = None
+#     for i, s in enumerate(slice_config):
+#         if s is None:
+#             if indexed_dim:
+#                 raise ValueError('Multiple indices got indexed')
+#             indexed_dim = i
+#     if indexed_dim is None:
+#         raise ValueError('No indexing dimension found')
+#     indexed_node = vars[0].parents[0]
+#     all_indices = np.stack([x.parents[1].cond_dist.value for x in vars]) # Get all indices together
+#     if np.array_equal(all_indices, np.arange(indexed_node.shape[indexed_dim])):
+#          # If all dimensions are selected, then no need to create a new index node
+#         return indexed_node, indexed_dim
+#     return vars[0].cond_dist(indexed_node, all_indices), indexed_dim
+
+
 def MergeIndexRVs(vars):
     '''
     Input:
@@ -80,21 +137,17 @@ def MergeIndexRVs(vars):
     assert all(
         x.parents[0] == vars[0].parents[0] for x in vars
     ) # Check all RVs are indexed from the same RV
-    slice_config = vars[0].cond_dist.slices
-    indexed_dim = None
-    for i, s in enumerate(slice_config):
-        if s is None:
-            if indexed_dim:
-                raise ValueError('Multiple indices got indexed')
-            indexed_dim = i
-    if indexed_dim is None:
-        raise ValueError('No indexing dimension found')
+    # slice_config = vars[0].cond_dist.slices
+    all_indices = np.array(
+        tree_map(lambda x: x.cond_dist.value, [var.parents[1:] for var in vars])
+    ).T
+    # TODO: Simplify the index node, if all dimensions are indexed, then we just Slice(None, None, None)
     indexed_node = vars[0].parents[0]
-    all_indices = np.stack([x.parents[1].cond_dist.value for x in vars]) # Get all indices together
-    if np.array_equal(all_indices, np.arange(indexed_node.shape[indexed_dim])):
-         # If all dimensions are selected, then no need to create a new index node
-        return indexed_node, indexed_dim
-    return vars[0].cond_dist(indexed_node, all_indices), indexed_dim
+    # Find vmap dim, if slices are consecutive, then it is dimension of the first "None" in slice,
+    # otherwise it is the 0th dimension.
+    slice_config = vars[0].cond_dist.slices
+    vmap_dim = find_first_none_consecutive(slice_config)
+    return vars[0].cond_dist(indexed_node, *all_indices), vmap_dim
 
 
 def AggregateParents(parents):
@@ -194,8 +247,8 @@ def AutoVmap(vars, given_vars, given_vals, order=0):
     assert isinstance(given_vals, list)
     assert len(given_vars) == len(given_vals)
     given_vars_t, given_vals_t = [], []
-    user_input_vars = vars + given_vars
-    vars = dag.upstream_nodes(user_input_vars)
+    user_input_vars = vars
+    vars = dag.upstream_nodes(vars + given_vars)
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
         vmappable_groups = Find(vars, given_vars=given_vars)
@@ -214,13 +267,13 @@ def AutoVmap(vars, given_vars, given_vals, order=0):
             X_prime, _ = Merge(selected_group)
         old = selected_group
         new = [X_prime[g] for g in range(len(selected_group))]
-        vars_updated = Replace(vars, old, new)
+        vars_updated = Replace(vars, old, new) # vars_update has same length as vars
         # We need to update the given_vars as well,
         # otherwise RVs in new would never be marked as observed
         for old_var, new_var in zip(vars, vars_updated):
             if old_var in given_vars:
                 given_vars[given_vars.index(old_var)] = new_var
-        # Input vars in the current DAG
+        # User given vars in the current DAG
         user_input_vars = [vars_updated[idx] for idx in input_vars_idx] 
         vars = dag.upstream_nodes(vars_updated)
         # Input vars' indices in the updated DAG
