@@ -248,9 +248,9 @@ def test_AutoVmap():
         assert all(isinstance(var.cond_dist, Index) for var in transformed_var)
 
     
-    x = normal(0,1)
-    y = [normal(x,1) for i in range(3)]
-    z = [[normal(yi,1) for i in range(4)] for yi in y]
+    x = normal(1,1)
+    y = [normal(x + i,1) for i in range(3)]
+    z = [[normal(yi + i,1) for i in range(4)] for yi in y]
     _test_model(y + z, order=0)
     _test_model(y + z, order=-1)
 
@@ -294,5 +294,5 @@ def test_AutoVmap():
 
 test_find()
 test_merge_indexed_rv()
-# test_merge()
+test_merge()
 test_AutoVmap()
