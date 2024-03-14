@@ -196,6 +196,44 @@ def case14():
     given_vals = [i for i in range(3)]
     return y, given_vars, given_vals
 
+def case15():
+    x = normal(1,1)
+    y = []
+    z = []
+    u = []
+    for i in range(2):
+        yi = normal(x + i, 1)
+        y.append(yi)
+        for j in range(3):
+            zi = normal(yi + j, 1)
+            z.append(zi)
+            for k in range(4):
+                ui = normal(zi + k, k + 1)
+                u.append(ui)
+    given_vars = [z[0], u[3:5]]
+    given_vals = [i for i in range(3)]
+    return y, given_vars, given_vals
+
+
+def case16():
+    x = normal_scale(1, 2)
+    y = {}
+    z = {}
+    for i in range(2):
+        for j in range(2):
+            y[(i, j)] = normal_scale(x, i + j + 1)
+            z[(i, j)] = normal_scale(x, 1)
+            
+    O = {}
+    for i in range(2):
+        for j in range(2):
+            O[(i, j)] = bernoulli_logit(y[(i, j)] * z[i, j])
+
+    observed_vars = [O[(i, j)] for j in [1, 0] for i in [0, 1]] 
+    observed_vals = [0, 1, 1, 0]
+
+    return O, observed_vars, observed_vals
+
 
 def test_AutoVmap_base():
     """
@@ -248,7 +286,7 @@ def test_AutoVmap_posterior():
                                    transformed_given_var, transformed_given_vals,
                                    verbose=True)
 
-    cases = [case10, case11, case12, case13, case14]
+    cases = [case10, case11, case12, case13, case14, case15, case16]
     for case in cases:
         _test_model(case, 0)
         _test_model(case, -1)
@@ -256,5 +294,5 @@ def test_AutoVmap_posterior():
     print('AutoVmap posterior test passed')
 
 
-test_AutoVmap_base()
+# test_AutoVmap_base()
 test_AutoVmap_posterior()
