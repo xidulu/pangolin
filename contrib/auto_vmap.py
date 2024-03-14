@@ -14,6 +14,7 @@ from jax import numpy as jnp
 import time
 import numpy as np
 from collections import defaultdict
+from copy import deepcopy
 
 
 def find_first_none_consecutive(my_list):
@@ -224,15 +225,15 @@ def Replace(vars, old, new):
     in the upstream nodes of RVs in new.
     """
     # TODO: Simplify the check
-    # upstreams_old = [dag.upstream_nodes(o) for o in old]
-    # upstreams_new = [dag.upstream_nodes(n) for n in new]
-    # for o in old:
-    #     if o in new:
-    #         assert False, "old should not show up in new"
-    #     if any(o in u_old[:-1] for u_old in upstreams_old):
-    #         assert False, "old should all be on the same level in the DAG"
-    #     if any(o in u_new[:-1] for u_new in upstreams_new):
-    #         assert False, "new should not have old in upstream"
+    upstreams_old = [dag.upstream_nodes(o) for o in old]
+    upstreams_new = [dag.upstream_nodes(n) for n in new]
+    for o in old:
+        if o in new:
+            assert False, "old should not show up in new"
+        if any(o in u_old[:-1] for u_old in upstreams_old):
+            assert False, "old should all be on the same level in the DAG"
+        if any(o in u_new[:-1] for u_new in upstreams_new):
+            assert False, "new should not have old in upstream"
 
     all_vars = dag.upstream_nodes(vars)
     replacements = dict(zip(old, new))
@@ -252,7 +253,7 @@ def Replace(vars, old, new):
     return [old_to_new[v] for v in vars]
             
 
-def AutoVmap(vars, given_vars, given_vals, order=0):
+def AutoVmap(vars, given_vars, given_vals, order=-1):
     '''
     vars: A list of RVs
     given_vars: A list of RVs that we know is observed
@@ -262,23 +263,37 @@ def AutoVmap(vars, given_vars, given_vals, order=0):
     assert isinstance(given_vars, list)
     assert isinstance(given_vals, list)
     assert len(given_vars) == len(given_vals)
+    
     given_vars_t, given_vals_t = [], []
     user_input_vars = vars
     vars = dag.upstream_nodes(vars + given_vars)
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
-        vmappable_groups = Find(vars, given_vars=given_vars)
+        vmappable_groups = Find(vars, given_vars=given_vars + given_vars_t)
         if len(vmappable_groups) < 1:
             break
         selected_group = vmappable_groups[order] # We alwayws merge the first group found
-        group_is_observed = selected_group[0] in given_vars
+        group_is_observed = selected_group[0] in given_vars + given_vars_t
         if group_is_observed:
-            y_vals = [
-                given_vals[given_vars.index(x)] for x in selected_group
-            ]
-            X_prime, Y = Merge(selected_group, y_vals)
-            given_vars_t.append(X_prime)
-            given_vals_t.append(Y)
+            if selected_group[0] in given_vars:
+                indices = [given_vars.index(x) for x in selected_group]
+                y_vals = [
+                    given_vals[i] for i in indices
+                ]
+                X_prime, Y = Merge(selected_group, y_vals)
+                given_vars_t.append(X_prime)
+                given_vals_t.append(Y)
+            else:
+                indices = [given_vars_t.index(x) for x in selected_group]
+                y_vals = [
+                    given_vals_t[i] for i in indices
+                ]
+                X_prime, Y = Merge(selected_group, y_vals)
+                given_vars_t.append(X_prime)
+                given_vals_t.append(Y)
+                for i in indices:
+                    given_vars_t.pop(i)
+                    given_vals_t.pop(i)
         else:
             X_prime, _ = Merge(selected_group)
         old = selected_group
@@ -289,6 +304,8 @@ def AutoVmap(vars, given_vars, given_vals, order=0):
         for old_var, new_var in zip(vars, vars_updated):
             if old_var in given_vars:
                 given_vars[given_vars.index(old_var)] = new_var
+            elif old_var in given_vars_t:
+                given_vars_t[given_vars_t.index(old_var)] = new_var
         # User given vars in the current DAG
         user_input_vars = [vars_updated[idx] for idx in input_vars_idx] 
         vars = dag.upstream_nodes(vars_updated)
