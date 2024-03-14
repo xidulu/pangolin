@@ -16,6 +16,8 @@ import numpy as np
 from collections import defaultdict
 from copy import deepcopy
 
+def del_indices(my_list, indices):
+    return [x for i, x in enumerate(my_list) if i not in indices]
 
 def find_first_none_consecutive(my_list):
     '''
@@ -264,51 +266,41 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
     assert isinstance(given_vals, list)
     assert len(given_vars) == len(given_vals)
     
-    given_vars_t, given_vals_t = [], []
     user_input_vars = vars
     vars = dag.upstream_nodes(vars + given_vars)
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
-        vmappable_groups = Find(vars, given_vars=given_vars + given_vars_t)
+        vmappable_groups = Find(vars, given_vars=given_vars)
         if len(vmappable_groups) < 1:
             break
         selected_group = vmappable_groups[order] # We alwayws merge the first group found
-        group_is_observed = selected_group[0] in given_vars + given_vars_t
+        group_is_observed = selected_group[0] in given_vars
         if group_is_observed:
-            if selected_group[0] in given_vars:
-                indices = [given_vars.index(x) for x in selected_group]
-                y_vals = [
-                    given_vals[i] for i in indices
-                ]
-                X_prime, Y = Merge(selected_group, y_vals)
-                given_vars_t.append(X_prime)
-                given_vals_t.append(Y)
-            else:
-                indices = [given_vars_t.index(x) for x in selected_group]
-                y_vals = [
-                    given_vals_t[i] for i in indices
-                ]
-                X_prime, Y = Merge(selected_group, y_vals)
-                given_vars_t.append(X_prime)
-                given_vals_t.append(Y)
-                for i in indices:
-                    given_vars_t.pop(i)
-                    given_vals_t.pop(i)
+            indices = [given_vars.index(x) for x in selected_group]
+            y_vals = [
+                given_vals[i] for i in indices
+            ]
+            X_prime, Y = Merge(selected_group, y_vals)
+            given_vars.append(X_prime)
+            given_vals.append(Y)
+            # No need to keep those 
+            given_vars = del_indices(given_vars, indices)
+            given_vals = del_indices(given_vals, indices)    
         else:
             X_prime, _ = Merge(selected_group)
         old = selected_group
         new = [X_prime[g] for g in range(len(selected_group))]
         vars_updated = Replace(vars, old, new) # vars_update has same length as vars
-        # We need to update the given_vars as well,
-        # otherwise RVs in new would never be marked as observed
+        # We need to update the given_vars as well, otherwise the RVs in given_vars
+        # will be out-of-date after we performed Replace
         for old_var, new_var in zip(vars, vars_updated):
             if old_var in given_vars:
+                # given_vars should NEVER contain index node
+                assert not isinstance(new_var.cond_dist, Index) 
                 given_vars[given_vars.index(old_var)] = new_var
-            elif old_var in given_vars_t:
-                given_vars_t[given_vars_t.index(old_var)] = new_var
         # User given vars in the current DAG
         user_input_vars = [vars_updated[idx] for idx in input_vars_idx] 
         vars = dag.upstream_nodes(vars_updated)
         # Input vars' indices in the updated DAG
         input_vars_idx = [vars.index(var) for var in user_input_vars]
-    return [vars[idx] for idx in input_vars_idx], given_vars_t, given_vals_t
+    return [vars[idx] for idx in input_vars_idx], given_vars, given_vals

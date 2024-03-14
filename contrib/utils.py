@@ -57,7 +57,8 @@ def check_same_joint_cond_dist(
         return True
     for num_samples in [10000, 50000, 100000, 500000, 1000000, 5000000, 10000000, 50000000]:
         if _assert(num_samples):
-            print('Assert passed')
+            if verbose:
+                print('Assert passed')
             return
     raise AssertionError('old_var and new_var do not have equal mean and cov')
 
