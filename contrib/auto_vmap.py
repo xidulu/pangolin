@@ -265,15 +265,18 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
     assert isinstance(given_vars, list)
     assert isinstance(given_vals, list)
     assert len(given_vars) == len(given_vals)
+    assert all(isinstance(var, RV) for var in vars)
+    assert all(isinstance(var, RV) for var in given_vars)
+    assert all(var.shape == val.shape for var, val in zip(given_vars, given_vals))
     
     user_input_vars = vars
-    vars = dag.upstream_nodes(vars + given_vars)
+    vars = dag.upstream_nodes(vars + given_vars) # All vars in the DAG
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
         vmappable_groups = Find(vars, given_vars=given_vars)
         if len(vmappable_groups) < 1:
             break
-        selected_group = vmappable_groups[order] # We alwayws merge the first group found
+        selected_group = vmappable_groups[order]
         group_is_observed = selected_group[0] in given_vars
         if group_is_observed:
             indices = [given_vars.index(x) for x in selected_group]
@@ -291,6 +294,7 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
         old = selected_group
         new = [X_prime[g] for g in range(len(selected_group))]
         vars_updated = Replace(vars, old, new) # vars_update has same length as vars
+        
         # We need to update the given_vars as well, otherwise the RVs in given_vars
         # will be out-of-date after we performed Replace
         for old_var, new_var in zip(vars, vars_updated):
@@ -298,9 +302,6 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
                 # given_vars should NEVER contain index node
                 assert not isinstance(new_var.cond_dist, Index) 
                 given_vars[given_vars.index(old_var)] = new_var
-        # User given vars in the current DAG
-        user_input_vars = [vars_updated[idx] for idx in input_vars_idx] 
-        vars = dag.upstream_nodes(vars_updated)
-        # Input vars' indices in the updated DAG
-        input_vars_idx = [vars.index(var) for var in user_input_vars]
+        # Add the newly created VRV to the vars
+        vars = vars_updated + [X_prime]
     return [vars[idx] for idx in input_vars_idx], given_vars, given_vals
