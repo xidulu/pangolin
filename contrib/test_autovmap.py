@@ -235,6 +235,19 @@ def case16():
     return O, observed_vars, observed_vals
 
 
+"""
+A few bad cases that should raise exception
+"""
+
+def case9():
+    x = normal(1,1)
+    y = [normal(x + i,1) for i in range(3)]
+    z = [[normal(yi + i,1) for i in range(4)] for yi in y]
+    given_vars = z
+    given_vals = [[1.0] * 4 for _ in range(len(y))]
+    return x, given_vars, given_vals
+
+
 def test_AutoVmap_base():
     """
     Prior check
