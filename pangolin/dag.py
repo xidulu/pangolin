@@ -12,8 +12,12 @@ class Node:
     parents, nothing more.
     """
 
+    allid = 0
+
     def __init__(self, *parents):
         self.parents = parents
+        self.id = Node.allid
+        Node.allid += 1
 
 
 def upstream_nodes_flat(nodes_flat, node_block, edge_block, upstream):

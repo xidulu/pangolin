@@ -267,10 +267,9 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
     assert len(given_vars) == len(given_vals)
     assert all(isinstance(var, RV) for var in vars)
     assert all(isinstance(var, RV) for var in given_vars)
-    assert all(var.shape == val.shape for var, val in zip(given_vars, given_vals))
-    
     user_input_vars = vars
     vars = dag.upstream_nodes(vars + given_vars) # All vars in the DAG
+    vars = sorted(vars, key=lambda rv: rv.id)
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
         vmappable_groups = Find(vars, given_vars=given_vars)
