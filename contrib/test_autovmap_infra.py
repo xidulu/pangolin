@@ -19,7 +19,7 @@ from utils import check_same_joint_cond_dist
 def _test_raise_exception(func, *args, **kwargs):
     try:
         func(*args, **kwargs)
-    except AssertionError:
+    except (AssertionError, ValueError):
         pass
     else:
         assert False, 'no exception catched'

@@ -16,6 +16,8 @@ import numpy as np
 from collections import defaultdict
 from contrib import AutoVmap
 import time
+import argparse
+
 
 
 def get_standard_model(K, seed=1):
@@ -46,7 +48,7 @@ def get_autovmap_model(K, seed=1):
 def get_autovmap_transformation_time(K, seed=1):
     vars, given_vars, given_vals = get_standard_model(K, seed)
     begin = time.time()
-    tvars, tgvars, tgvals = AutoVmap(vars, given_vars, given_vals)
+    tvars, tgvars, tgvals = AutoVmap(vars, given_vars, given_vals, -1)
     end = time.time()
     return end - begin
 

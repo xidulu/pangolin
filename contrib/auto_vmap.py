@@ -176,7 +176,10 @@ def AggregateParents(parents):
     depending on the their cond_dist
     '''
     cond_dist_type = parents[0].cond_dist
-    if isinstance(cond_dist_type, Index):
+    if all(p == parents[0] for p in parents):
+        merged_parents = parents[0]
+        in_axis = None
+    elif isinstance(cond_dist_type, Index):
         # MergeIndexRVs would perform the condition check
         merged_parents, in_axis = MergeIndexRVs(parents) 
     elif isinstance(cond_dist_type, Constant):
@@ -186,11 +189,8 @@ def AggregateParents(parents):
         merged_parents = np.stack([p.cond_dist.value for p in parents])
         in_axis = 0
     else:
-        assert all(
-            p == parents[0] for p in parents
-        ), "Parents not Index not Constant and not being the same RV"
-        merged_parents = parents[0]
-        in_axis = None
+        raise ValueError("Parents cannot be merged together")
+        
     return merged_parents, in_axis
 
 
@@ -227,15 +227,15 @@ def Replace(vars, old, new):
     in the upstream nodes of RVs in new.
     """
     # TODO: Simplify the check
-    upstreams_old = [dag.upstream_nodes(o) for o in old]
-    upstreams_new = [dag.upstream_nodes(n) for n in new]
-    for o in old:
-        if o in new:
-            assert False, "old should not show up in new"
-        if any(o in u_old[:-1] for u_old in upstreams_old):
-            assert False, "old should all be on the same level in the DAG"
-        if any(o in u_new[:-1] for u_new in upstreams_new):
-            assert False, "new should not have old in upstream"
+    # upstreams_old = [dag.upstream_nodes(o) for o in old]
+    # upstreams_new = [dag.upstream_nodes(n) for n in new]
+    # for o in old:
+    #     if o in new:
+    #         assert False, "old should not show up in new"
+    #     if any(o in u_old[:-1] for u_old in upstreams_old):
+    #         assert False, "old should all be on the same level in the DAG"
+    #     if any(o in u_new[:-1] for u_new in upstreams_new):
+    #         assert False, "new should not have old in upstream"
 
     all_vars = dag.upstream_nodes(vars)
     replacements = dict(zip(old, new))
@@ -253,6 +253,24 @@ def Replace(vars, old, new):
 
         old_to_new[var] = new_var
     return [old_to_new[v] for v in vars]
+
+
+def SimpleReplace(vars, old, new):
+    """
+    Replace nodes by directly modifying the DAG
+    """
+    assert all(
+        isinstance(x.cond_dist, Index) for x in new
+    )
+    replacements = dict(zip(old, new))
+    apply_replacements = lambda x: replacements[x] if x in replacements else x
+    for i in range(len(vars)):
+        if vars[i] in replacements:
+            vars[i] = replacements[vars[i]]
+        else:
+            vars[i].parents = [apply_replacements(p) for p in vars[i].parents]
+    return vars
+
             
 
 def AutoVmap(vars, given_vars, given_vals, order=-1):
@@ -269,6 +287,8 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
     assert all(isinstance(var, RV) for var in given_vars)
     user_input_vars = vars
     vars = dag.upstream_nodes(vars + given_vars) # All vars in the DAG
+    for var in vars:
+        var.__dict__['_frozen'] = False
     vars = sorted(vars, key=lambda rv: rv.id)
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
@@ -285,14 +305,17 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
             X_prime, Y = Merge(selected_group, y_vals)
             given_vars.append(X_prime)
             given_vals.append(Y)
-            # No need to keep those 
+            # Remove out-of-date given_vars and given_vals
             given_vars = del_indices(given_vars, indices)
             given_vals = del_indices(given_vals, indices)    
         else:
             X_prime, _ = Merge(selected_group)
         old = selected_group
         new = [X_prime[g] for g in range(len(selected_group))]
-        vars_updated = Replace(vars, old, new) # vars_update has same length as vars
+        for var in [X_prime] + new:
+            var.__dict__['_frozen'] = False
+        # vars_updated = Replace(vars, old, new) # vars_update has same length as vars
+        vars_updated = SimpleReplace(vars, old, new) # Direclty modify the RVs
         
         # We need to update the given_vars as well, otherwise the RVs in given_vars
         # will be out-of-date after we performed Replace
@@ -301,6 +324,9 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
                 # given_vars should NEVER contain index node
                 assert not isinstance(new_var.cond_dist, Index) 
                 given_vars[given_vars.index(old_var)] = new_var
-        # Add the newly created VRV to the vars
+        # Add the newly created VRV to the vars.
+        # vars always contains all RVs in the DAG
         vars = vars_updated + [X_prime]
+    for var in vars:
+        var.__dict__['_frozen'] = True
     return [vars[idx] for idx in input_vars_idx], given_vars, given_vals

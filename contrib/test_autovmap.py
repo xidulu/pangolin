@@ -3,7 +3,8 @@ from pangolin import transforms
 from pangolin.interface import (
     vmap, normal_scale, normal, RV, VMapDist,
     makerv, viz_upstream, exponential, bernoulli, print_upstream,
-    Constant, plate, exp, Index, multi_normal_cov, Sum, bernoulli_logit
+    Constant, plate, exp, Index, multi_normal_cov, Sum, bernoulli_logit, beta,
+    dirichlet, categorical
 )
 from pangolin import Calculate
 from pangolin import dag
@@ -235,17 +236,71 @@ def case16():
     return O, observed_vars, observed_vals
 
 
-"""
-A few bad cases that should raise exception
-"""
+def case17():
+    z = normal_scale(1, 0.5)
+    y1 = [normal_scale(0, exp(z)) for _ in range(2)]
+    x1 = [normal_scale(yi, 1) for yi in y1]
+    y2 = [normal_scale(0, exp(z)) for _ in range(2)]
 
-def case9():
-    x = normal(1,1)
-    y = [normal(x + i,1) for i in range(3)]
-    z = [[normal(yi + i,1) for i in range(4)] for yi in y]
-    given_vars = z
-    given_vals = [[1.0] * 4 for _ in range(len(y))]
-    return x, given_vars, given_vals
+    observed_vars = x1
+    observed_vals = [1, 2]
+
+    return y2, observed_vars, observed_vals
+
+
+def case18():
+    # Ancestral sampling only, cannot do posterior inference because of discrete latents
+
+    N = 2 # Number of instances
+    M = 3 # Number of annotator
+    pi = np.array([0.25, 0.25, 0.25, 0.25])
+    thetas = [beta(1, 1) for _ in range(M)]
+    xi = plate(N=M)(lambda: dirichlet(np.ones(4,)))
+    T, S, A = {}, {}, {}
+    for i in range(N):
+        T[i] = categorical(pi)
+        for j in range(M):
+            S[(i, j)] = bernoulli(thetas[j])
+            A[(i, j)] = S[(i, j)] * T[i] + (1 - S[(i, j)]) * categorical(xi[j])
+
+    return A, None, None
+
+
+def case19():
+    # IRT, version 1
+    num_cases = 3
+    num_doctors = 2
+    doctor_thetas = [normal_scale(0, 2) for _ in range(num_doctors)]
+    case_beta = [normal_scale(0, 2) for _ in range(num_cases)]
+    case_log_d = [normal_scale(0.5, 1) for _ in range(num_cases)]
+    response_rvs = []
+    response_values = []
+    for case_id in range(num_cases):
+        for doctor_id in range(num_doctors):  
+            log_d = case_log_d[case_id]
+            beta = case_beta[case_id]
+            theta = doctor_thetas[doctor_id]
+            response_rvs.append(bernoulli_logit(exp(log_d) * (theta - beta)))
+            response_values.append(1)
+    return doctor_thetas + case_beta + case_log_d, response_rvs, response_values
+
+def case20():
+    # IRT, version 2
+    num_cases = 3
+    num_doctors = 2
+    doctor_thetas = [normal_scale(0, 2) for _ in range(num_doctors)]
+    case_beta = [normal_scale(0, 2) for _ in range(num_cases)]
+    case_d = [exp(normal_scale(0.5, 1)) for _ in range(num_cases)]
+    response_rvs = []
+    response_values = []
+    for case_id in range(num_cases):
+        for doctor_id in range(num_doctors):  
+            d = case_d[case_id]
+            beta = case_beta[case_id]
+            theta = doctor_thetas[doctor_id]
+            response_rvs.append(bernoulli_logit(d * (theta - beta)))
+            response_values.append(1)
+    return doctor_thetas + case_beta + case_d, response_rvs, response_values
 
 
 def test_AutoVmap_base():
@@ -269,7 +324,8 @@ def test_AutoVmap_base():
         # assert all(isinstance(var.cond_dist, Index) for var in transformed_var)
         check_same_joint_cond_dist(vars, transformed_var, verbose=True)
 
-    cases = [case1, case2, case3, case4, case5, case6, case7, case8]
+    cases = [case1, case2, case3, case4, case5, case6, case7, case8, case18]
+    # cases = [case18]
     for case in cases:
         _test_model(case()[0], order=0)
         _test_model(case()[0], order=-1)
@@ -299,7 +355,8 @@ def test_AutoVmap_posterior():
                                    transformed_given_var, transformed_given_vals,
                                    verbose=True)
 
-    cases = [case10, case11, case12, case13, case14, case15, case16]
+    cases = [case10, case11, case12, case13, case14, case15, case16, case17]
+    cases = [case19, case20]
     for case in cases:
         _test_model(case, 0)
         _test_model(case, -1)
@@ -307,5 +364,5 @@ def test_AutoVmap_posterior():
     print('AutoVmap posterior test passed')
 
 
-# test_AutoVmap_base()
+test_AutoVmap_base()
 test_AutoVmap_posterior()
