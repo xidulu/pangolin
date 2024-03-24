@@ -281,7 +281,10 @@ class vmap:
             if i is None:
                 new_shape = x.shape
             else:
+<<<<<<< HEAD
                 # print(f"{i=}")
+=======
+>>>>>>> upstream/main
                 lo, mid, hi = (x.shape[:i], x.shape[i], x.shape[i + 1 :])
                 new_shape = lo + hi
 
@@ -291,9 +294,12 @@ class vmap:
             else:
                 return AbstractRV(new_shape)
 
+<<<<<<< HEAD
         #print(f"{args=}")
         #print(f"{self.in_axes=}")
 
+=======
+>>>>>>> upstream/main
         dummy_args = util.tree_map_recurse_at_leaf(
             get_dummy, self.in_axes, args, is_leaf=util.is_leaf_with_none
         )
@@ -304,9 +310,12 @@ class vmap:
         tree1 = jax.tree_util.tree_structure(args, is_leaf=util.is_leaf_with_none)
         tree2 = jax.tree_util.tree_structure(dummy_args, is_leaf=util.is_leaf_with_none)
         tree3 = jax.tree_util.tree_structure(new_in_axes, is_leaf=util.is_leaf_with_none)
+<<<<<<< HEAD
         #print(f"{tree1=}")
         #print(f"{tree2=}")
         #print(f"{tree3=}")
+=======
+>>>>>>> upstream/main
         assert tree1 == tree2
         assert tree1 == tree3
 
@@ -551,3 +560,25 @@ viz_upstream = viz  # TODO: delete after changing calls
 #         graph = viz_samples(vars, precision=precision)
 #         IPython.display.display_png(graph)
 #         time.sleep(wait)
+
+
+_all_objects = vars()
+
+
+def list_all_cond_dists():
+    from inspect import isclass
+
+    """Convenience function to print out all available CondDists"""
+    # print(_all_objects)
+    print("List of all CondDist OBJECTS with random=True:")
+    for name, item in _all_objects.items():
+        if isinstance(item, CondDist) and item.random:
+            print(f"  {name}")
+    print("List of all CondDist OBJECTS with random=False:")
+    for name, item in _all_objects.items():
+        if isinstance(item, CondDist) and not item.random:
+            print(f"  {name}")
+    print("List of all CondDist CLASSES:")
+    for name, item in _all_objects.items():
+        if isclass(item) and issubclass(item, CondDist):
+            print(f"  {name}")

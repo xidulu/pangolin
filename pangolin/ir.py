@@ -1,8 +1,5 @@
 """
-The core of Pangolin: The intermediate representation that is used to represent
-probabilistic models. This representation is very simple: `CondDist` objects
-represent conditional distributions. `RV` objects represent random variables. A
-random variable just has two members: A `CondDist` and a list of parent `RV`s.
+The core of Pangolin: The intermediate representation that is used to represent probabilistic models. This representation is very simple: `CondDist` objects represent conditional distributions. `RV` objects represent random variables. A random variable just has two members: A `CondDist` and a list of parent `RV`s.
 """
 
 from abc import ABC, abstractmethod
@@ -130,13 +127,53 @@ uniform = AllScalarCondDist(2, "uniform", True)
 beta = AllScalarCondDist(2, "beta", True)
 exponential = AllScalarCondDist(1, "exponential", True)
 beta_binomial = AllScalarCondDist(3, "beta_binomial", True)
+# basic math operators, typically triggered infix operations
 add = AllScalarCondDist(2, "add", False)
 sub = AllScalarCondDist(2, "sub", False)
 mul = AllScalarCondDist(2, "mul", False)
 div = AllScalarCondDist(2, "div", False)
 pow = AllScalarCondDist(2, "pow", False)
+# all the scalar functions included in JAGS manual
+# in general, try to use numpy / scipy names where possible
 abs = AllScalarCondDist(1, "abs", False)
+arccos = AllScalarCondDist(1, "arccos", False)
+arccosh = AllScalarCondDist(1, "arccosh", False)
+arcsin = AllScalarCondDist(1, "arcsin", False)
+arcsinh = AllScalarCondDist(1, "arcsinh", False)
+arctan = AllScalarCondDist(1, "arctan", False)
+arctanh = AllScalarCondDist(1, "arctanh", False)
+cos = AllScalarCondDist(1, "cos", False)
+cosh = AllScalarCondDist(1, "cosh", False)
 exp = AllScalarCondDist(1, "exp", False)
+inv_logit = AllScalarCondDist(1, "inv_logit", False)
+expit = inv_logit  # scipy name
+sigmoid = inv_logit  # another name
+log = AllScalarCondDist(1, "log", False)
+# TODO: do we want scipy.special.loggamma or scipy.special.gammaln? different!
+loggamma = AllScalarCondDist(1, "loggamma", False)
+logit = AllScalarCondDist(1, "logit", False)  # logit in JAGS / stan / scipy
+sin = AllScalarCondDist(1, "sin", False)
+sinh = AllScalarCondDist(1, "sinh", False)
+step = AllScalarCondDist(1, "sin", False)  # step in JAGS / stan
+tan = AllScalarCondDist(1, "tan", False)
+tanh = AllScalarCondDist(1, "tanh", False)
+# currently skipped from JAGS scalar functions
+# cloglog # g(p) = log(-log(1-p)) = log(log(1/(1-p)))
+# equals(x, y)
+# icloglog(x)
+# ifelse(x, a, b)
+# logfact(x)
+# loggamma in scipy / loggam in JAGS / lgamma in STAN
+# phi(x)
+# pow(x, z)
+# nothing in scipy / probit in JAGS
+# probit(x)
+# round(x)
+# trunc(x)
+
+
+def sqrt(x):
+    return x**0.5
 
 
 class VecMatCondDist(CondDist):
@@ -149,10 +186,13 @@ class VecMatCondDist(CondDist):
         super().__init__(name=name, random=True)
 
     def get_shape(self, vec_shape, mat_shape):
-        assert len(vec_shape) == 1
-        assert len(mat_shape) == 2
+        assert len(vec_shape) == 1, "first parameter must be a vector"
+        assert len(mat_shape) == 2, "second parameter must be a matrix"
         N = vec_shape[0]
-        assert mat_shape == (N, N)
+        assert mat_shape == (
+            N,
+            N,
+        ), "second parameter must be matrix with size matching first parameter"
         return (N,)
 
 
@@ -208,6 +248,43 @@ class MatMul(CondDist):
 matmul = MatMul()
 
 
+class Inverse(CondDist):
+    def __init__(self):
+        super().__init__(name="inv", random=False)
+
+    def get_shape(self, *parents):
+        assert len(parents) == 1
+        p_shape = parents[0]
+        assert len(p_shape) == 2, "inverse only applies to 2d arrays"
+        assert p_shape[0] == p_shape[1], "inverse only for square 2d arrays"
+        return p_shape
+
+
+inv = Inverse()
+
+
+class Softmax(CondDist):
+    def __init__(self):
+        super().__init__(name="softmax", random=False)
+
+    def get_shape(self, *parents):
+        assert len(parents) == 1
+        p_shape = parents[0]
+        assert len(p_shape) == 1, "input to softmax would be 1d"
+        return p_shape
+
+
+softmax = Softmax()
+
+# class SquareMatrixCondDist(CondDist):
+#
+#     def __init__(self):
+#         super().__init__(name="matmul", random=False)
+#
+#     def get_shape(self, *parents):
+#         assert len(parents)==1
+
+
 class Categorical(CondDist):
     def __init__(self):
         super().__init__(name="categorical", random=True)
@@ -218,6 +295,18 @@ class Categorical(CondDist):
 
 
 categorical = Categorical()
+
+
+# class CategoricalLogit(CondDist):
+#     def __init__(self):
+#         super().__init__(name="categorical_logit", random=True)
+#
+#     def get_shape(self, weights_shape):
+#         # TODO: check shape
+#         return ()
+#
+#
+# categorical_logit = Categorical()
 
 
 class Dirichlet(CondDist):
@@ -621,10 +710,27 @@ class RV(dag.Node):
         return len(self._shape)
 
     def __getitem__(self, idx):
+        if not isinstance(idx, tuple):
+            idx = (idx,)
+
+        # convert ellipsis into slices
+        num_ellipsis = sum(1 for i in idx if i is ...)
+        if num_ellipsis > 1:
+            raise ValueError("an index can only have a single ellipsis ('...')")
+        if num_ellipsis == 1:
+            where = idx.index(...)
+            slices_needed = self.ndim - (len(idx) - 1)  # sub out ellipsis
+            if where > 0:
+                idx_start = idx[:where]
+            else:
+                idx_start = ()
+            idx_mid = (slice(None),) * slices_needed
+            idx_end = idx[where + 1 :]
+
+            idx = idx_start + idx_mid + idx_end
+
         # TODO: special cases for Loops
-        if isinstance(idx, Loop):
-            return slice_existing_rv(self, [idx], Loop.loops)
-        elif isinstance(idx, tuple) and any(isinstance(p, Loop) for p in idx):
+        if any(isinstance(p, Loop) for p in idx):
             for p in idx:
                 assert isinstance(p, Loop) or p == slice(
                     None
