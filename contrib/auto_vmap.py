@@ -40,7 +40,6 @@ def find_first_none_consecutive(my_list):
     return first_none_index
 
 
-
 def HashKey(var):
     '''
     var: An RV
@@ -58,6 +57,7 @@ def HashKey(var):
             subkey = (p,)
         key = key + subkey
     return key
+
 
 def Find(vars, given_vars=[]):
     '''
@@ -87,41 +87,6 @@ def Find(vars, given_vars=[]):
             else:
                 groupped_rvs.append(v)
     return groupped_rvs
-
-
-# def MergeIndexRVs(vars):
-#     '''
-#     Input:
-#     A list of RVs with Index(slices) as cond_dist, where the value of slices is the same
-#     for all RVs, i.e. indexed from the same axis.
-#     In addition, all RVs are indexed from the same RV.
-#     Lastly, all RVs should be indexed from a single axis only, otherwise vmap cannot work.
-    
-#     Return:
-#     A single Index RV, and an interger denoting the dimension being indexed.
-#     '''
-#     assert isinstance(vars[0].cond_dist, Index)
-#     assert all(
-#         x.cond_dist == vars[0].cond_dist for x in vars
-#     ) # Check all RVs have the same slice, i.e. indexed from the same axis
-#     assert all(
-#         x.parents[0] == vars[0].parents[0] for x in vars
-#     ) # Check all RVs are indexed from the same RV
-#     slice_config = vars[0].cond_dist.slices
-#     indexed_dim = None
-#     for i, s in enumerate(slice_config):
-#         if s is None:
-#             if indexed_dim:
-#                 raise ValueError('Multiple indices got indexed')
-#             indexed_dim = i
-#     if indexed_dim is None:
-#         raise ValueError('No indexing dimension found')
-#     indexed_node = vars[0].parents[0]
-#     all_indices = np.stack([x.parents[1].cond_dist.value for x in vars]) # Get all indices together
-#     if np.array_equal(all_indices, np.arange(indexed_node.shape[indexed_dim])):
-#          # If all dimensions are selected, then no need to create a new index node
-#         return indexed_node, indexed_dim
-#     return vars[0].cond_dist(indexed_node, all_indices), indexed_dim
 
 
 def MergeIndexRVs(vars):
@@ -289,7 +254,8 @@ def AutoVmap(vars, given_vars, given_vals, order=-1):
     vars = dag.upstream_nodes(vars + given_vars) # All vars in the DAG
     for var in vars:
         var.__dict__['_frozen'] = False
-    vars = sorted(vars, key=lambda rv: rv.id)
+    if hasattr(vars[0], 'id'):
+        vars = sorted(vars, key=lambda rv: rv.id)
     input_vars_idx = [vars.index(var) for var in user_input_vars]
     while True:
         vmappable_groups = Find(vars, given_vars=given_vars)

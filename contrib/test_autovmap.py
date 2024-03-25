@@ -325,7 +325,6 @@ def test_AutoVmap_base():
         check_same_joint_cond_dist(vars, transformed_var, verbose=True)
 
     cases = [case1, case2, case3, case4, case5, case6, case7, case8, case18]
-    # cases = [case18]
     for case in cases:
         _test_model(case()[0], order=0)
         _test_model(case()[0], order=-1)
@@ -355,8 +354,7 @@ def test_AutoVmap_posterior():
                                    transformed_given_var, transformed_given_vals,
                                    verbose=True)
 
-    cases = [case10, case11, case12, case13, case14, case15, case16, case17]
-    cases = [case19, case20]
+    cases = [case10, case11, case12, case13, case14, case15, case16, case17, case19, case20]
     for case in cases:
         _test_model(case, 0)
         _test_model(case, -1)

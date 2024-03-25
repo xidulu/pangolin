@@ -86,7 +86,7 @@ def get_runtime(model_creator, save_dir_template):
             calc = Calculate("numpyro",niter=1000)
             vars, given_vars, given_vals = model_creator(K, seed)
             begin = time.time()
-            samples = calc.sample(vars, given_vars, given_vals)
+            samples = calc.sample(vars, given_vars, given_vals)∫
             end = time.time()
             times.append(end - begin)
         np.save(save_dir_template.format(K), np.array(times))

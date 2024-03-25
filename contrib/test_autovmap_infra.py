@@ -135,11 +135,10 @@ def test_merge_indexed_rv():
     assert merged_rv.shape == (4, 5)
     assert indexed_dim == 0
 
-    ## This case does not work
-    # indexed_nodes = [y[0, ...], y[0, ...], y[1, ...], y[2, ...]]
-    # merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
-    # assert merged_rv.shape == (4, 5, 6)
-    # assert indexed_dim == 0
+    indexed_nodes = [y[0, ...], y[0, ...], y[1, ...], y[2, ...]]
+    merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
+    assert merged_rv.shape == (4, 5, 6)
+    assert indexed_dim == 0
 
     indexed_nodes = [y[:, 0, 0], y[:, 1, 0], y[:, 1, 1], y[:, 0, 2]]
     merged_rv, indexed_dim = MergeIndexRVs(indexed_nodes)
